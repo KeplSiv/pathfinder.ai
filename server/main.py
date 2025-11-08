@@ -8,12 +8,15 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import httpx
+import torch
 from fastapi import FastAPI, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from PIL import Image
 from ultralytics import YOLO
 from anthropic import Anthropic, APIStatusError, APIError
 from dotenv import load_dotenv
+from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
 LOGGER = logging.getLogger("torch-detector")
 
@@ -42,6 +45,7 @@ class Detection(BaseModel):
     confidence: float
     bbox: List[float]
     updatedAt: int
+    relative_depth: Optional[float] = None
 
 
 class DetectionResponse(BaseModel):
@@ -78,8 +82,83 @@ def _ensure_model() -> YOLO:
     return YOLO(MODEL_PATH.as_posix())
 
 
+# Global variables for depth estimation
+DEPTH_DEVICE = torch.device("cpu")
+
+
+def _load_depth_model():
+    """Load MiDaS depth estimation model"""
+    try:
+        # Use fast processor if available, fallback to slow if needed
+        try:
+            processor = AutoImageProcessor.from_pretrained("Intel/dpt-hybrid-midas", use_fast=True)
+        except Exception:
+            # Fallback to slow processor if fast is not available
+            processor = AutoImageProcessor.from_pretrained("Intel/dpt-hybrid-midas", use_fast=False)
+        model = AutoModelForDepthEstimation.from_pretrained("Intel/dpt-hybrid-midas")
+        model.eval()
+        model.to(DEPTH_DEVICE)
+        return processor, model
+    except Exception as exc:
+        LOGGER.exception("Failed to load depth model: %s", exc)
+        return None, None
+
+
+def get_depth_map(frame: Image.Image) -> Optional[np.ndarray]:
+    """Generate depth map from image using MiDaS model"""
+    if DEPTH_PROCESSOR is None or DEPTH_MODEL is None:
+        return None
+    
+    try:
+        # Ensure image is in RGB format
+        if frame.mode != "RGB":
+            frame = frame.convert("RGB")
+        
+        # Process image with explicit HWC format to avoid channel ambiguity
+        inputs = DEPTH_PROCESSOR(
+            images=frame, 
+            return_tensors="pt",
+            input_data_format="HWC"  # Height × Width × Channels (PIL/OpenCV convention)
+        ).to(DEPTH_DEVICE)
+        
+        with torch.no_grad():
+            outputs = DEPTH_MODEL(**inputs)
+        
+        # Extract depth map - shape should be (H, W) after squeeze
+        depth = outputs.predicted_depth[0].squeeze().cpu().numpy()
+        
+        # Ensure depth is 2D (H, W)
+        if len(depth.shape) > 2:
+            depth = depth.squeeze()
+        
+        # Normalize 0 → 1 for relative depth
+        depth_min = depth.min()
+        depth_max = depth.max()
+        if depth_max - depth_min > 0:
+            depth_norm = (depth - depth_min) / (depth_max - depth_min)
+        else:
+            depth_norm = np.zeros_like(depth)
+        
+        return depth_norm
+    except Exception as exc:
+        LOGGER.warning("Depth estimation failed (non-fatal): %s", exc)
+        return None
+
+
 app = FastAPI(title="YOLO11n Traffic Detector", version="1.0.0")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 MODEL = None
+DEPTH_PROCESSOR = None
+DEPTH_MODEL = None
 ANTHROPIC_CLIENT: Optional[Anthropic] = None
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-20250514")
 ELEVEN_LABS_API_KEY = os.getenv("ELEVEN_LABS_API_KEY", "").strip().strip('"').strip("'")
@@ -89,6 +168,8 @@ ELEVEN_LABS_WEBHOOK_URL = os.getenv("ELEVEN_LABS_WEBHOOK_URL", "https://localhos
 SYSTEM_PROMPT = (
     "You are a safety-focused mobility assistant. Analyse incoming detections from a live camera feed "
     "and return concise, actionable guidance that highlights hazards, traffic signals, or obstacles. "
+    "Each detection includes relative_depth (0.0 = closest/nearby, 1.0 = farthest/distant) - use this "
+    "to prioritize warnings about nearby objects and provide spatial context. "
     "Respond in one or two short sentences. Avoid JSON."
 )
 
@@ -96,6 +177,7 @@ SYSTEM_PROMPT = (
 @app.on_event("startup")
 def load_model():
     global MODEL  # pylint: disable=global-statement
+    global DEPTH_PROCESSOR, DEPTH_MODEL  # pylint: disable=global-statement
     global ANTHROPIC_CLIENT  # pylint: disable=global-statement
     try:
         MODEL = _ensure_model()
@@ -103,6 +185,18 @@ def load_model():
     except Exception as exc:  # pylint: disable=broad-except
         LOGGER.exception("Failed to load YOLO model: %s", exc)
         raise
+
+    # Load depth estimation model
+    try:
+        DEPTH_PROCESSOR, DEPTH_MODEL = _load_depth_model()
+        if DEPTH_PROCESSOR is not None and DEPTH_MODEL is not None:
+            LOGGER.info("Loaded MiDaS depth estimation model")
+        else:
+            LOGGER.warning("Depth estimation model not loaded; depth features will be disabled")
+    except Exception as exc:  # pylint: disable=broad-except
+        LOGGER.warning("Failed to load depth model (non-fatal): %s", exc)
+        DEPTH_PROCESSOR = None
+        DEPTH_MODEL = None
 
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip().strip('"').strip("'")
     if api_key:
@@ -153,6 +247,23 @@ def detect(payload: ImagePayload):
         LOGGER.exception("Model inference failed: %s", exc)
         raise HTTPException(status_code=500, detail="Model inference failed") from exc
 
+    # Generate depth map if depth model is available (non-blocking, errors won't break detection)
+    depth_map = None
+    if DEPTH_PROCESSOR is not None and DEPTH_MODEL is not None:
+        try:
+            depth_map = get_depth_map(image)
+            if depth_map is not None:
+                # Resize depth map to match image dimensions if needed
+                if depth_map.shape != (image.height, image.width):
+                    from PIL import Image as PILImage
+                    depth_pil = PILImage.fromarray((depth_map * 255).astype(np.uint8))
+                    depth_pil = depth_pil.resize((image.width, image.height), PILImage.Resampling.LANCZOS)
+                    depth_map = np.array(depth_pil).astype(np.float32) / 255.0
+        except Exception as exc:
+            # Depth estimation failed, but continue with YOLO detections
+            LOGGER.warning("Depth estimation failed (non-fatal): %s", exc)
+            depth_map = None
+
     detections = []
     from time import time
 
@@ -176,12 +287,32 @@ def detect(payload: ImagePayload):
             if confidence < threshold:
                 continue
             x1, y1, x2, y2 = map(float, box.xyxy[0].tolist())
+            
+            # Calculate relative depth if depth map is available
+            relative_depth = None
+            if depth_map is not None:
+                try:
+                    # Convert bbox coordinates to integers and ensure they're within bounds
+                    x1_int = max(0, int(x1))
+                    y1_int = max(0, int(y1))
+                    x2_int = min(depth_map.shape[1], int(x2))
+                    y2_int = min(depth_map.shape[0], int(y2))
+                    
+                    if x2_int > x1_int and y2_int > y1_int:
+                        # Crop depth region inside bbox
+                        region = depth_map[y1_int:y2_int, x1_int:x2_int]
+                        # Compute median relative depth
+                        relative_depth = float(np.median(region))
+                except Exception as exc:
+                    LOGGER.warning("Failed to compute depth for detection: %s", exc)
+            
             detections.append(
                 Detection(
                     label=label,
                     confidence=confidence,
                     bbox=[x1, y1, x2 - x1, y2 - y1],
                     updatedAt=timestamp,
+                    relative_depth=relative_depth,
                 )
             )
 
