@@ -6,6 +6,7 @@ import AlertTranscript from "./components/AlertTranscript";
 import ControlPanel from "./components/ControlPanel";
 import AudioFeedback from "./components/AudioFeedback";
 import DetectionResultsPanel from "./components/DetectionResultsPanel";
+import ClaudeDisplay from "./components/ClaudeDisplay";
 import { CameraProvider, useCameraContext } from "./context/CameraContext";
 import {
   DetectionProvider,
@@ -26,6 +27,7 @@ function GuidanceApp() {
   const videoRef = useRef(null);
   const [guidanceActive, setGuidanceActive] = useState(false);
   const [showOverlay, setShowOverlay] = useState(true);
+  const [llmIntervalMs, setLlmIntervalMs] = useState(1000);
   const pollIntervalMs = 600;
 
   return (
@@ -35,7 +37,12 @@ function GuidanceApp() {
       enabled={guidanceActive}
       pollIntervalMs={pollIntervalMs}
     >
-      <LLMProvider endpoint="/api/llm" enabled={guidanceActive}>
+      <LLMProvider
+        endpoint="/api/llm"
+        enabled={guidanceActive}
+        minIntervalMs={llmIntervalMs}
+        context={{ intervalMs: llmIntervalMs }}
+      >
         <Layout>
           <div className="video-section">
             <div style={{ position: "relative" }}>
@@ -46,6 +53,7 @@ function GuidanceApp() {
                   showOverlay ? <DetectionOverlay videoRef={feedRef} /> : null
                 }
               />
+              <ClaudeDisplay />
             </div>
             <DetectionResultsPanel isGuidanceActive={guidanceActive} />
           </div>
@@ -56,6 +64,8 @@ function GuidanceApp() {
               onStopGuidance={() => setGuidanceActive(false)}
               showOverlay={showOverlay}
               onToggleOverlay={setShowOverlay}
+              llmIntervalMs={llmIntervalMs}
+              onChangeLLMInterval={setLlmIntervalMs}
             />
             <AlertTranscript maxItems={8} />
             <AudioFeedback

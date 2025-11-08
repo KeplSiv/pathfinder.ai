@@ -13,6 +13,15 @@ This FastAPI service loads the local `yolo11n.pt` checkpoint and exposes an HTTP
    ```bash
    cp /path/to/yolo11n.pt ./models/yolo11n.pt
    ```
+4. Set up Anthropic API key for LLM features:
+   ```bash
+   export ANTHROPIC_API_KEY="sk-ant-api03-..."
+   ```
+   Or create a `.env` file in the `server/` directory:
+   ```
+   ANTHROPIC_API_KEY=sk-ant-api03-...
+   ANTHROPIC_MODEL=claude-3-5-sonnet-20241022  # optional
+   ```
 
 ## Run
 
@@ -24,7 +33,9 @@ You should see a log confirming the model loaded. Health check is available at `
 
 ## API
 
-`POST /detect`
+### `POST /api/detect`
+
+Detects traffic objects in an image.
 
 ```json
 {
@@ -33,5 +44,33 @@ You should see a log confirming the model loaded. Health check is available at `
 }
 ```
 
-Returns the filtered detections suitable for the React app’s overlay and JSON panel.
+Returns the filtered detections suitable for the React app's overlay and JSON panel.
 
+### `POST /api/llm`
+
+Generates safety guidance from detection results using Claude.
+
+```json
+{
+  "detections": [
+    {
+      "label": "car",
+      "confidence": 0.85,
+      "bbox": [100, 200, 50, 30],
+      "updatedAt": 1234567890
+    }
+  ],
+  "context": {},
+  "prompt": "optional custom system prompt"
+}
+```
+
+Returns:
+
+```json
+{
+  "message": "Safety guidance text from Claude"
+}
+```
+
+Requires `ANTHROPIC_API_KEY` to be set, otherwise returns 503.

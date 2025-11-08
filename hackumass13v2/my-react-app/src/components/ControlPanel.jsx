@@ -7,8 +7,11 @@ export default function ControlPanel({
   onStopGuidance,
   showOverlay,
   onToggleOverlay,
+  llmIntervalMs,
+  onChangeLLMInterval,
 }) {
-  const { devices, deviceId, setDeviceId, refreshDevices, isEnumerating } = useCameraContext();
+  const { devices, deviceId, setDeviceId, refreshDevices, isEnumerating } =
+    useCameraContext();
 
   const cameraOptions = useMemo(
     () =>
@@ -32,7 +35,9 @@ export default function ControlPanel({
         minWidth: "240px",
       }}
     >
-      <h2 style={{ margin: 0, fontSize: "1.125rem", fontWeight: 600 }}>Controls</h2>
+      <h2 style={{ margin: 0, fontSize: "1.125rem", fontWeight: 600 }}>
+        Controls
+      </h2>
 
       <div style={{ display: "flex", gap: "0.5rem" }}>
         <button
@@ -55,9 +60,37 @@ export default function ControlPanel({
       </div>
 
       <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-        <input type="checkbox" checked={showOverlay} onChange={(event) => onToggleOverlay?.(event.target.checked)} />
+        <input
+          type="checkbox"
+          checked={showOverlay}
+          onChange={(event) => onToggleOverlay?.(event.target.checked)}
+        />
         <span>Show Bounding Boxes</span>
       </label>
+
+      {typeof llmIntervalMs === "number" && onChangeLLMInterval && (
+        <div
+          style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+        >
+          <label htmlFor="llm-interval" style={{ fontWeight: 500 }}>
+            Claude Update Frequency
+          </label>
+          <input
+            id="llm-interval"
+            type="range"
+            min={500}
+            max={5000}
+            step={250}
+            value={llmIntervalMs}
+            onChange={(event) =>
+              onChangeLLMInterval(Number(event.target.value))
+            }
+          />
+          <span style={{ fontSize: "0.8rem", color: "#4B5563" }}>
+            Sends detections every {(llmIntervalMs / 1000).toFixed(2)}s
+          </span>
+        </div>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
         <label htmlFor="camera-select" style={{ fontWeight: 500 }}>
@@ -67,9 +100,15 @@ export default function ControlPanel({
           id="camera-select"
           value={deviceId ?? ""}
           onChange={(event) => setDeviceId(event.target.value)}
-          style={{ padding: "0.5rem", borderRadius: "0.5rem", border: "1px solid #D1D5DB" }}
+          style={{
+            padding: "0.5rem",
+            borderRadius: "0.5rem",
+            border: "1px solid #D1D5DB",
+          }}
         >
-          {cameraOptions.length === 0 && <option value="">No cameras found</option>}
+          {cameraOptions.length === 0 && (
+            <option value="">No cameras found</option>
+          )}
           {cameraOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}

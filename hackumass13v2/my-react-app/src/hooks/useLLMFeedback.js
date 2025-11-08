@@ -12,7 +12,10 @@ export function useLLMFeedback({
   context = {},
   minIntervalMs = DEFAULT_INTERVAL_MS,
 } = {}) {
-  const llmService = useMemo(() => new LLMService({ endpoint, transformer }), [endpoint, transformer]);
+  const llmService = useMemo(
+    () => new LLMService({ endpoint, transformer }),
+    [endpoint, transformer]
+  );
   const [message, setMessage] = useState(null);
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState(null);
@@ -23,7 +26,10 @@ export function useLLMFeedback({
       throttle(async (currentDetections, currentContext) => {
         try {
           setStatus("running");
-          const guidance = await llmService.generateGuidance(currentDetections, currentContext);
+          const guidance = await llmService.generateGuidance(
+            currentDetections,
+            currentContext
+          );
           setMessage(guidance);
           setStatus("idle");
           setError(null);
@@ -40,8 +46,16 @@ export function useLLMFeedback({
       return undefined;
     }
 
-    const signature = JSON.stringify(detections ?? []);
-    if (signature === lastSignatureRef.current || !detections || detections.length === 0) {
+    if (!detections || detections.length === 0) {
+      return undefined;
+    }
+
+    const signature = JSON.stringify({
+      detections,
+      context,
+    });
+
+    if (signature === lastSignatureRef.current) {
       return undefined;
     }
 
