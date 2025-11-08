@@ -6,14 +6,20 @@ const DEFAULT_OPTIONS = {
   volume: 1,
   lang: "en-US",
   queue: true,
+  delayBetweenMessages: 0, // Delay in milliseconds between messages
 };
 
 export function useAudioQueue(options = {}) {
-  const { queue, useSpeechSynthesis = true, voiceMatcher, ...speechOptions } = { ...DEFAULT_OPTIONS, ...options };
+  const { queue, useSpeechSynthesis = true, voiceMatcher, delayBetweenMessages, ...speechOptions } = {
+    ...DEFAULT_OPTIONS,
+    ...options,
+  };
   const [items, setItems] = useState([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isWaiting, setIsWaiting] = useState(false);
   const [error, setError] = useState(null);
   const audioRef = useRef(null);
+  const delayTimeoutRef = useRef(null);
 
   const enqueue = useCallback(
     (message) => {
@@ -40,8 +46,11 @@ export function useAudioQueue(options = {}) {
 
   useEffect(() => {
     if (!isBrowser()) return undefined;
-    if (isSpeaking) return undefined;
-    if (items.length === 0) return undefined;
+    if (isSpeaking || isWaiting) return undefined;
+    if (items.length === 0) {
+      setIsWaiting(false);
+      return undefined;
+    }
 
     const [current, ...rest] = items;
     const play = async () => {
@@ -57,13 +66,25 @@ export function useAudioQueue(options = {}) {
       } finally {
         setIsSpeaking(false);
         setItems(rest);
+
+        // Add delay before processing next message
+        if (delayBetweenMessages > 0 && rest.length > 0) {
+          setIsWaiting(true);
+          delayTimeoutRef.current = setTimeout(() => {
+            setIsWaiting(false);
+          }, delayBetweenMessages);
+        }
       }
     };
 
     play();
 
-    return () => {};
-  }, [items, isSpeaking, speechOptions, useSpeechSynthesis, voiceMatcher]);
+    return () => {
+      if (delayTimeoutRef.current) {
+        clearTimeout(delayTimeoutRef.current);
+      }
+    };
+  }, [items, isSpeaking, isWaiting, speechOptions, useSpeechSynthesis, voiceMatcher, delayBetweenMessages]);
 
   return {
     enqueue,

@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+import httpx
+from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel, Field
 from PIL import Image
 from ultralytics import YOLO
@@ -81,6 +82,10 @@ app = FastAPI(title="YOLO11n Traffic Detector", version="1.0.0")
 MODEL = None
 ANTHROPIC_CLIENT: Optional[Anthropic] = None
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-20250514")
+ELEVEN_LABS_API_KEY = os.getenv("ELEVEN_LABS_API_KEY", "").strip().strip('"').strip("'")
+ELEVEN_LABS_WEBHOOK_SECRET = os.getenv("ELEVEN_LABS_WEBHOOK_SECRET", "").strip().strip('"').strip("'")
+ELEVEN_LABS_VOICE_ID = os.getenv("ELEVEN_LABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Default voice
+ELEVEN_LABS_WEBHOOK_URL = os.getenv("ELEVEN_LABS_WEBHOOK_URL", "https://localhost:5173/hackumass/TTSTHING")
 SYSTEM_PROMPT = (
     "You are a safety-focused mobility assistant. Analyse incoming detections from a live camera feed "
     "and return concise, actionable guidance that highlights hazards, traffic signals, or obstacles. "
@@ -252,6 +257,88 @@ def generate_guidance(payload: LLMRequest):
             message += block.text
 
     return LLMResponse(message=message.strip() or None)
+
+
+class TTSRequest(BaseModel):
+    text: str
+    voice_id: Optional[str] = None
+
+
+class TTSResponse(BaseModel):
+    success: bool
+    message: str
+
+
+@app.post("/api/tts", response_model=TTSResponse)
+async def text_to_speech(payload: TTSRequest):
+    """Send text to Eleven Labs for TTS via webhook"""
+    if not ELEVEN_LABS_API_KEY:
+        raise HTTPException(status_code=503, detail="Eleven Labs API key not configured")
+
+    voice_id = payload.voice_id or ELEVEN_LABS_VOICE_ID
+    text = payload.text.strip()
+
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream",
+                headers={
+                    "xi-api-key": ELEVEN_LABS_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "text": text,
+                    "model_id": "eleven_multilingual_v2",
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.75,
+                    },
+                },
+                params={
+                    "output_format": "mp3_44100_128",
+                    "webhook_url": ELEVEN_LABS_WEBHOOK_URL,
+                },
+            )
+            response.raise_for_status()
+            return TTSResponse(success=True, message="TTS request sent to Eleven Labs")
+    except httpx.HTTPStatusError as exc:
+        LOGGER.exception("Eleven Labs API error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Eleven Labs API error: {exc.response.text}") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        LOGGER.exception("Failed to send TTS request: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to send TTS request") from exc
+
+
+@app.post("/api/eleven-webhook")
+async def eleven_webhook(
+    request_data: Dict[str, Any],
+    x_eleven_secret: Optional[str] = Header(None, alias="X-Eleven-Secret"),
+):
+    """Receive webhook events from Eleven Labs"""
+    if ELEVEN_LABS_WEBHOOK_SECRET and x_eleven_secret != ELEVEN_LABS_WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
+    event_type = request_data.get("event")
+    event_data = request_data.get("data", {})
+
+    LOGGER.info("Eleven Labs webhook event: %s", event_type)
+
+    if event_type == "audio_chunk":
+        audio_base64 = event_data.get("audio")
+        if audio_base64:
+            try:
+                audio_bytes = base64.b64decode(audio_base64)
+                # Forward to frontend via WebSocket or store for retrieval
+                # For now, just log it
+                LOGGER.info("Received audio chunk: %d bytes", len(audio_bytes))
+                # In a real implementation, you'd stream this to the frontend
+            except Exception as exc:  # pylint: disable=broad-except
+                LOGGER.exception("Failed to decode audio chunk: %s", exc)
+
+    return {"status": "received"}
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ function GuidanceApp() {
   const [guidanceActive, setGuidanceActive] = useState(false);
   const [showOverlay, setShowOverlay] = useState(true);
   const [llmIntervalMs, setLlmIntervalMs] = useState(1000);
+  const [ttsDelayMs, setTtsDelayMs] = useState(0);
   const pollIntervalMs = 600;
 
   return (
@@ -66,10 +67,14 @@ function GuidanceApp() {
               onToggleOverlay={setShowOverlay}
               llmIntervalMs={llmIntervalMs}
               onChangeLLMInterval={setLlmIntervalMs}
+              ttsDelayMs={ttsDelayMs}
+              onChangeTTSDelay={setTtsDelayMs}
             />
             <AlertTranscript maxItems={8} />
             <AudioFeedback
               enabled={guidanceActive}
+              queueOptions={{ delayBetweenMessages: ttsDelayMs }}
+              useElevenLabs={true}
               renderStatus={({ isSpeaking, pending, error }) => (
                 <div className="audio-status">
                   <span>{isSpeaking ? "Speaking…" : "Idle"}</span>

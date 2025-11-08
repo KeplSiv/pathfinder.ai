@@ -13,14 +13,16 @@ This FastAPI service loads the local `yolo11n.pt` checkpoint and exposes an HTTP
    ```bash
    cp /path/to/yolo11n.pt ./models/yolo11n.pt
    ```
-4. Set up Anthropic API key for LLM features:
-   ```bash
-   export ANTHROPIC_API_KEY="sk-ant-api03-..."
-   ```
-   Or create a `.env` file in the `server/` directory:
+4. Set up API keys in `.env` file in the `server/` directory:
    ```
    ANTHROPIC_API_KEY=sk-ant-api03-...
-   ANTHROPIC_MODEL=claude-3-5-sonnet-20241022  # optional
+   ANTHROPIC_MODEL=claude-opus-4-20250514  # optional
+   
+   # Eleven Labs TTS (optional)
+   ELEVEN_LABS_API_KEY=your_eleven_labs_api_key
+   ELEVEN_LABS_WEBHOOK_SECRET=your_webhook_secret  # optional, for webhook security
+   ELEVEN_LABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM  # optional, default voice
+   ELEVEN_LABS_WEBHOOK_URL=https://localhost:5173/hackumass/TTSTHING  # webhook endpoint
    ```
 
 ## Run

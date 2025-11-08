@@ -9,6 +9,8 @@ export default function ControlPanel({
   onToggleOverlay,
   llmIntervalMs,
   onChangeLLMInterval,
+  ttsDelayMs = 0,
+  onChangeTTSDelay,
 }) {
   const { devices, deviceId, setDeviceId, refreshDevices, isEnumerating } =
     useCameraContext();
@@ -88,6 +90,30 @@ export default function ControlPanel({
           />
           <span style={{ fontSize: "0.8rem", color: "#4B5563" }}>
             Sends detections every {(llmIntervalMs / 1000).toFixed(2)}s
+          </span>
+        </div>
+      )}
+
+      {typeof ttsDelayMs === "number" && onChangeTTSDelay && (
+        <div
+          style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+        >
+          <label htmlFor="tts-delay" style={{ fontWeight: 500 }}>
+            TTS Message Delay
+          </label>
+          <input
+            id="tts-delay"
+            type="range"
+            min={0}
+            max={5000}
+            step={100}
+            value={ttsDelayMs}
+            onChange={(event) => onChangeTTSDelay(Number(event.target.value))}
+          />
+          <span style={{ fontSize: "0.8rem", color: "#4B5563" }}>
+            {ttsDelayMs === 0
+              ? "No delay between messages"
+              : `Delay: ${(ttsDelayMs / 1000).toFixed(1)}s between messages`}
           </span>
         </div>
       )}
