@@ -6,7 +6,10 @@ export async function fetchWithTimeout(resource, options = {}) {
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const response = await fetch(resource, { ...rest, signal: controller.signal });
+    const response = await fetch(resource, {
+      ...rest,
+      signal: controller.signal,
+    });
     if (!response.ok) {
       const error = new Error(`Request failed with status ${response.status}`);
       error.status = response.status;

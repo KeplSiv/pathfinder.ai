@@ -5,6 +5,7 @@ import BoundingBoxOverlay from "./components/BoundingBoxOverlay";
 import AlertTranscript from "./components/AlertTranscript";
 import ControlPanel from "./components/ControlPanel";
 import AudioFeedback from "./components/AudioFeedback";
+import DetectionResultsPanel from "./components/DetectionResultsPanel";
 import { CameraProvider, useCameraContext } from "./context/CameraContext";
 import {
   DetectionProvider,
@@ -25,23 +26,28 @@ function GuidanceApp() {
   const videoRef = useRef(null);
   const [guidanceActive, setGuidanceActive] = useState(false);
   const [showOverlay, setShowOverlay] = useState(true);
+  const pollIntervalMs = 600;
 
   return (
     <DetectionProvider
       videoRef={videoRef}
       endpoint="/api/detect"
       enabled={guidanceActive}
+      pollIntervalMs={pollIntervalMs}
     >
       <LLMProvider endpoint="/api/llm" enabled={guidanceActive}>
         <Layout>
           <div className="video-section">
-            <CameraFeed
-              ref={videoRef}
-              deviceId={deviceId}
-              renderOverlay={({ videoRef: feedRef }) =>
-                showOverlay ? <DetectionOverlay videoRef={feedRef} /> : null
-              }
-            />
+            <div style={{ position: "relative" }}>
+              <CameraFeed
+                ref={videoRef}
+                deviceId={deviceId}
+                renderOverlay={({ videoRef: feedRef }) =>
+                  showOverlay ? <DetectionOverlay videoRef={feedRef} /> : null
+                }
+              />
+            </div>
+            <DetectionResultsPanel isGuidanceActive={guidanceActive} />
           </div>
           <aside className="sidebar">
             <ControlPanel

@@ -54,8 +54,18 @@ export function useDetections({
     if (!enabled) return undefined;
 
     const intervalId = setInterval(() => {
-      const videoEl = videoRef?.current ?? videoRef;
-      if (videoEl) {
+      const refCandidate = videoRef?.current ?? videoRef;
+      const videoEl =
+        refCandidate?.videoElement ??
+        refCandidate?.current ??
+        refCandidate;
+
+      const canProcess =
+        (typeof HTMLVideoElement !== "undefined" &&
+          videoEl instanceof HTMLVideoElement) ||
+        videoEl?.tagName === "VIDEO";
+
+      if (canProcess) {
         throttledProcessFrame(videoEl);
       }
     }, pollIntervalMs);

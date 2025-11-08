@@ -1,0 +1,20 @@
+{
+  "settings_version": "0.0.6",
+  "datasets_dir": "/Users/sivasaran/Desktop/HackUmass13/datasets",
+  "weights_dir": "/Users/sivasaran/Desktop/HackUmass13/weights",
+  "runs_dir": "/Users/sivasaran/Desktop/HackUmass13/runs",
+  "uuid": "58a6c55ab0551684b97b7d6f9d66c4d6726410b700329e02bbb9d66e6ae4a0e8",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "hub": true,
+  "mlflow": true,
+  "neptune": true,
+  "raytune": true,
+  "tensorboard": true,
+  "wandb": false,
+  "vscode_msg": true
+}

@@ -7,8 +7,6 @@ export default function ControlPanel({
   onStopGuidance,
   showOverlay,
   onToggleOverlay,
-  modelStatus = "idle",
-  isModelReady = false,
 }) {
   const { devices, deviceId, setDeviceId, refreshDevices, isEnumerating } = useCameraContext();
 
@@ -40,40 +38,21 @@ export default function ControlPanel({
         <button
           type="button"
           onClick={isGuidanceActive ? onStopGuidance : onStartGuidance}
-          disabled={!isGuidanceActive && !isModelReady}
           style={{
             flex: 1,
             padding: "0.75rem",
             borderRadius: "0.5rem",
             border: "none",
-            background: isGuidanceActive
-              ? "#DC2626"
-              : !isModelReady
-              ? "#9CA3AF"
-              : "#2563EB",
+            background: isGuidanceActive ? "#DC2626" : "#2563EB",
             color: "#fff",
             fontWeight: 600,
-            cursor: !isGuidanceActive && !isModelReady ? "not-allowed" : "pointer",
+            cursor: "pointer",
             transition: "background 0.2s ease",
           }}
         >
           {isGuidanceActive ? "Stop Guidance" : "Start Guidance"}
         </button>
       </div>
-
-      {!isModelReady && (
-        <p
-          style={{
-            margin: 0,
-            fontSize: "0.75rem",
-            color: "#6B7280",
-          }}
-        >
-          {modelStatus === "loading"
-            ? "Loading YOLOv8 nano model. Start guidance once it is ready."
-            : "Model initialization failed. Refresh to retry."}
-        </p>
-      )}
 
       <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
         <input type="checkbox" checked={showOverlay} onChange={(event) => onToggleOverlay?.(event.target.checked)} />

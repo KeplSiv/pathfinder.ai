@@ -1,39 +1,29 @@
 import { useDetectionContext } from "../context/DetectionContext";
 
-export default function DetectionResultsPanel({
-  modelStatus,
-  modelError,
-  isGuidanceActive,
-}) {
+export default function DetectionResultsPanel({ isGuidanceActive }) {
   const { detections = [], status, error } = useDetectionContext();
 
-  const headline =
-    modelStatus === "loading"
-      ? "Loading YOLOv8 nano model…"
-      : modelStatus === "error"
-      ? "Model unavailable"
-      : isGuidanceActive
-      ? status === "running"
-        ? "Detecting traffic objects…"
-        : "Latest detections"
-      : "Detection paused";
+  const headline = isGuidanceActive
+    ? status === "running"
+      ? "Detecting traffic objects…"
+      : "Latest detections"
+    : "Detection paused";
 
-  const infoMessage =
-    modelStatus === "error"
-      ? modelError?.message ?? "Unable to initialize detector."
-      : error
-      ? error.message
-      : detections.length === 0 && isGuidanceActive && modelStatus === "ready"
-      ? "No traffic objects detected in the current frame."
-      : null;
+  const infoMessage = !isGuidanceActive
+    ? "Start guidance to run detections with the local PyTorch model server."
+    : error
+    ? `Detection error: ${
+        error.message || "Unable to reach the detection server."
+      }`
+    : detections.length === 0 && status !== "running"
+    ? "No traffic objects detected in the current frame."
+    : null;
 
   return (
     <div className="detection-json-panel">
       <div className="detection-json-header">
         <h3>{headline}</h3>
-        {isGuidanceActive && (
-          <StatusBadge status={status} modelStatus={modelStatus} />
-        )}
+        <StatusBadge status={status} isGuidanceActive={isGuidanceActive} />
       </div>
       {infoMessage && <p className="detection-json-message">{infoMessage}</p>}
       <pre className="detection-json-output">
@@ -41,7 +31,9 @@ export default function DetectionResultsPanel({
           detections.map((detection) => ({
             label: detection.label,
             confidence: Number((detection.confidence ?? 0).toFixed(3)),
-            bbox: detection.bbox?.map((value) => Number(value.toFixed(2))),
+            bbox: Array.isArray(detection.bbox)
+              ? detection.bbox.map((value) => Number(value.toFixed(2)))
+              : null,
             updatedAt: detection.updatedAt,
           })),
           null,
@@ -52,20 +44,22 @@ export default function DetectionResultsPanel({
   );
 }
 
-function StatusBadge({ status, modelStatus }) {
-  const label =
-    modelStatus === "loading"
-      ? "Loading model"
-      : status === "running"
-      ? "Processing"
-      : "Idle";
+function StatusBadge({ status, isGuidanceActive }) {
+  const label = !isGuidanceActive
+    ? "Inactive"
+    : status === "running"
+    ? "Processing"
+    : status === "error"
+    ? "Error"
+    : "Idle";
 
-  const tone =
-    modelStatus === "loading"
-      ? "#F97316"
-      : status === "running"
-      ? "#22C55E"
-      : "#60A5FA";
+  const tone = !isGuidanceActive
+    ? "#94A3B8"
+    : status === "running"
+    ? "#22C55E"
+    : status === "error"
+    ? "#F97316"
+    : "#60A5FA";
 
   return (
     <span
