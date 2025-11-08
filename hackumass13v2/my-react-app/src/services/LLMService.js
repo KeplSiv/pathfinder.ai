@@ -8,7 +8,7 @@ export default class LLMService {
     this.transformer = transformer;
   }
 
-  async generateGuidance(detections, context = {}, provider = "claude") {
+  async generateGuidance(detections, context = {}, provider = "claude", mode = "sentences") {
     if (!detections || detections.length === 0) {
       return null;
     }
@@ -21,6 +21,7 @@ export default class LLMService {
       detections,
       context,
       provider,
+      mode,
     });
 
     return response.message ?? null;

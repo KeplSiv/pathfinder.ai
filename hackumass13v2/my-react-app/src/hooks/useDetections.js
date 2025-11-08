@@ -21,6 +21,47 @@ export function useDetections({
   const [detections, setDetections] = useState([]);
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState(null);
+  const lastDetectionsSignatureRef = useRef(null);
+
+  // Normalize detections for comparison - ignore timestamps, bbox positions, and small depth changes
+  // Only care about: what objects are present, their types, and significant depth changes
+  const normalizeDetections = useCallback((dets) => {
+    if (!dets || dets.length === 0) return null;
+    
+    // Group by label and count, ignore exact positions
+    const grouped = {};
+    dets.forEach((d) => {
+      const key = d.label;
+      if (!grouped[key]) {
+        grouped[key] = {
+          label: key,
+          count: 0,
+          // Track depth ranges (close/mid/far) instead of exact values
+          depthCategory: d.relative_depth !== null && d.relative_depth !== undefined
+            ? (d.relative_depth < 0.33 ? 'close' : d.relative_depth < 0.66 ? 'mid' : 'far')
+            : null,
+          minConfidence: d.confidence,
+        };
+      }
+      grouped[key].count += 1;
+      grouped[key].minConfidence = Math.min(grouped[key].minConfidence, d.confidence);
+    });
+    
+    // Convert to sorted array for consistent comparison
+    const normalized = Object.values(grouped)
+      .sort((a, b) => {
+        if (a.label !== b.label) return a.label.localeCompare(b.label);
+        return b.minConfidence - a.minConfidence;
+      })
+      .map((g) => ({
+        label: g.label,
+        count: g.count,
+        depthCategory: g.depthCategory,
+        confidence: Math.round(g.minConfidence * 100) / 100,
+      }));
+    
+    return JSON.stringify(normalized);
+  }, []);
 
   const processFrame = useCallback(
     async (videoEl) => {
@@ -34,7 +75,14 @@ export function useDetections({
 
         setStatus("running");
         const results = await detectionService.detect(frame);
-        setDetections(results);
+        
+        // Only update if detections actually changed (ignore timestamp changes)
+        const newSignature = normalizeDetections(results);
+        if (newSignature !== lastDetectionsSignatureRef.current) {
+          lastDetectionsSignatureRef.current = newSignature;
+          setDetections(results);
+        }
+        
         setError(null);
         setStatus("idle");
       } catch (err) {
@@ -42,7 +90,7 @@ export function useDetections({
         setStatus("error");
       }
     },
-    [detectionService]
+    [detectionService, normalizeDetections]
   );
 
   const throttledProcessFrame = useMemo(

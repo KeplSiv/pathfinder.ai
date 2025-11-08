@@ -1,8 +1,11 @@
+import asyncio
 import base64
 import io
 import json
 import logging
 import os
+import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -167,18 +170,45 @@ DEPTH_MODEL = None
 ANTHROPIC_CLIENT: Optional[Anthropic] = None
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-20250514")
 GEMINI_CLIENT = None
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+# Rate limiting for Gemini free tier (10 requests/minute)
+GEMINI_REQUEST_TIMESTAMPS = deque(maxlen=10)  # Track last 10 requests
 ELEVEN_LABS_API_KEY = os.getenv("ELEVEN_LABS_API_KEY", "").strip().strip('"').strip("'")
+# Limit concurrent TTS requests to avoid overwhelming Eleven Labs API
+TTS_SEMAPHORE = asyncio.Semaphore(2)  # Max 2 concurrent TTS requests
 ELEVEN_LABS_WEBHOOK_SECRET = os.getenv("ELEVEN_LABS_WEBHOOK_SECRET", "").strip().strip('"').strip("'")
 ELEVEN_LABS_VOICE_ID = os.getenv("ELEVEN_LABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Default voice
 ELEVEN_LABS_WEBHOOK_URL = os.getenv("ELEVEN_LABS_WEBHOOK_URL", "https://localhost:5173/hackumass/TTSTHING")
-SYSTEM_PROMPT = (
+# Short alerts mode (1-3 words per detection) - token limited
+SHORT_ALERTS_PROMPT = (
+    "You are a safety-focused mobility assistant. Analyze incoming detections from a live camera feed. "
+    "Each detection includes a label and relative_depth (0 = very close, 1 = far). "
+    "CRITICAL: Output ONLY short, urgent alerts using 1-3 words maximum per detection. "
+    "Aggregate similar detections: if there are multiple of the same type, say 'two people' instead of 'person person', "
+    "'three cars' instead of 'car car car', etc. "
+    "Format: label + proximity (e.g., 'Fire very close', 'Two people ahead', 'Stop sign close'). "
+    "DO NOT use full sentences. DO NOT use JSON. DO NOT explain. "
+    "Only provide essential keywords for immediate action. Chain multiple alerts with commas if needed. "
+    "Example good output: 'Car close, Two people ahead, Fire very close' "
+    "Example bad output: 'I can see a car that is very close to you' or 'There is a person ahead'"
+)
+
+# Sentences mode (full sentences) - for speech/TTS, no token limiters
+SENTENCES_PROMPT = (
     "You are a safety-focused mobility assistant. Analyse incoming detections from a live camera feed "
     "and return concise, actionable guidance that highlights hazards, traffic signals, or obstacles. "
     "Each detection includes relative_depth (0.0 = closest/nearby, 1.0 = farthest/distant) - use this "
     "to prioritize warnings about nearby objects and provide spatial context. "
-    "Respond in one or two short sentences. Avoid JSON."
+    "CRITICAL: Aggregate similar detections - if there are multiple of the same type, say 'two people' instead of "
+    "'person person', 'three cars' instead of 'car car car', etc. "
+    "You MUST respond in a complete, natural sentence suitable for text-to-speech. "
+    "DO NOT use short keywords or fragments. Use proper grammar and full sentences. "
+    "Example good output: 'There are two people ahead and a car approaching from the left.' "
+    "Example bad output: 'Person person car' or 'Two people, car close'"
 )
+
+# Default to sentences mode
+SYSTEM_PROMPT = SENTENCES_PROMPT
 
 
 @app.on_event("startup")
@@ -349,6 +379,7 @@ class LLMRequest(BaseModel):
     context: Dict[str, Any] = Field(default_factory=dict)
     prompt: Optional[str] = None
     provider: Optional[str] = "claude"  # "claude" or "gemini"
+    mode: Optional[str] = "sentences"  # "sentences" or "short_alerts"
 
 
 class LLMResponse(BaseModel):
@@ -362,13 +393,11 @@ def _render_prompt(payload: LLMRequest) -> str:
     ]
     context = payload.context or {}
     parts = [
-        "Analyse the following detections for potential hazards or guidance.",
-        "Provide concise advice for a visually impaired pedestrian navigating traffic.",
-        "Detections JSON:",
+        "Detections:",
         json.dumps(detections, indent=2),
     ]
     if context:
-        parts.append(f"Additional context: {json.dumps(context, indent=2)}")
+        parts.append(f"Context: {json.dumps(context, indent=2)}")
     return "\n\n".join(parts)
 
 
@@ -378,25 +407,93 @@ def generate_guidance(payload: LLMRequest):
         return LLMResponse(message=None)
 
     provider = (payload.provider or "claude").lower()
+    mode = (payload.mode or "sentences").lower()
     user_prompt = _render_prompt(payload)
-    system_prompt = payload.prompt or SYSTEM_PROMPT
+    
+    # Select prompt based on mode
+    # "sentences" mode: uses SENTENCES_PROMPT (full sentences) + no token limiters (for speech/TTS)
+    # "short_alerts" mode: uses SHORT_ALERTS_PROMPT (1-3 words) + token limiters
+    if payload.prompt:
+        system_prompt = payload.prompt
+    elif mode == "sentences":
+        system_prompt = SENTENCES_PROMPT  # Full sentences prompt
+    else:  # short_alerts mode (default)
+        system_prompt = SHORT_ALERTS_PROMPT  # Short alerts prompt
+    
+    # Determine token limits based on mode
+    # Sentences mode: no token limiters (600 tokens for speech/TTS)
+    # Short alerts mode: keep token limiters (50 tokens)
+    max_tokens = 1600 if mode == "sentences" else 50
 
     if provider == "gemini":
         if GEMINI_CLIENT is None:
             raise HTTPException(status_code=503, detail="Gemini client is not configured")
         
+        # Rate limiting: Free tier allows 10 requests per minute
+        current_time = time.time()
+        # Remove timestamps older than 60 seconds
+        while GEMINI_REQUEST_TIMESTAMPS and current_time - GEMINI_REQUEST_TIMESTAMPS[0] > 60:
+            GEMINI_REQUEST_TIMESTAMPS.popleft()
+        
+        # Check if we're at the limit
+        if len(GEMINI_REQUEST_TIMESTAMPS) >= 10:
+            oldest_request = GEMINI_REQUEST_TIMESTAMPS[0]
+            wait_time = 60 - (current_time - oldest_request)
+            if wait_time > 0:
+                retry_msg = f"Gemini API rate limit exceeded (10 requests/minute). Please wait {int(wait_time)} seconds or switch to Claude."
+                raise HTTPException(status_code=429, detail=retry_msg)
+        
         try:
+            # Record this request
+            GEMINI_REQUEST_TIMESTAMPS.append(current_time)
+            
             # Combine system prompt and user prompt for Gemini
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
             response = GEMINI_CLIENT.models.generate_content(
                 model=GEMINI_MODEL,
-                contents=full_prompt
+                contents=full_prompt,
+                config={"max_output_tokens": max_tokens}
             )
-            message = response.text if hasattr(response, 'text') else str(response)
-            return LLMResponse(message=message.strip() or None)
+            # Handle response - check if text exists and is not None
+            if hasattr(response, 'text') and response.text is not None:
+                message = response.text.strip() if response.text.strip() else None
+            else:
+                # Try to get text from response candidates if available
+                if hasattr(response, 'candidates') and response.candidates:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                        parts = candidate.content.parts
+                        if parts:
+                            message = parts[0].text.strip() if hasattr(parts[0], 'text') and parts[0].text else None
+                        else:
+                            message = None
+                    else:
+                        message = None
+                else:
+                    message = None
+            
+            return LLMResponse(message=message)
         except Exception as exc:  # pylint: disable=broad-except
-            LOGGER.exception("Gemini API error: %s", exc)
-            raise HTTPException(status_code=502, detail="Gemini service unavailable") from exc
+            # Check if it's a rate limit error (429)
+            error_str = str(exc)
+            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "quota" in error_str.lower():
+                LOGGER.warning("Gemini rate limit exceeded: %s", exc)
+                # Extract retry delay if available
+                retry_msg = "Gemini API rate limit exceeded (10 requests/minute on free tier). Please wait a moment or switch to Claude."
+                raise HTTPException(status_code=429, detail=retry_msg)
+            elif hasattr(exc, 'status_code') and exc.status_code == 429:
+                # Handle rate limit from our own rate limiter
+                LOGGER.warning("Gemini rate limit (prevented): %s", exc)
+                raise HTTPException(status_code=429, detail=str(exc))
+            else:
+                LOGGER.exception("Gemini API error: %s", exc)
+                # Provide more detailed error message
+                error_detail = f"Gemini API error: {str(exc)}"
+                if "API key" in error_str.lower() or "authentication" in error_str.lower():
+                    error_detail = "Gemini API key invalid or not configured. Please check your GEMINI_API_KEY."
+                elif "quota" in error_str.lower():
+                    error_detail = "Gemini API quota exceeded. Please check your usage limits or switch to Claude."
+                raise HTTPException(status_code=502, detail=error_detail) from exc
     
     else:  # Default to Claude
         if ANTHROPIC_CLIENT is None:
@@ -405,7 +502,7 @@ def generate_guidance(payload: LLMRequest):
         try:
             response = ANTHROPIC_CLIENT.messages.create(
                 model=ANTHROPIC_MODEL,
-                max_tokens=600,
+                max_tokens=max_tokens,
                 temperature=0.1,
                 system=system_prompt,
                 messages=[
@@ -449,7 +546,8 @@ class TTSResponse(BaseModel):
 async def text_to_speech(payload: TTSRequest):
     """Send text to Eleven Labs for TTS via webhook"""
     if not ELEVEN_LABS_API_KEY:
-        raise HTTPException(status_code=503, detail="Eleven Labs API key not configured")
+        # Don't log warning for every request - only log at startup or first request
+        return TTSResponse(success=False, message="Eleven Labs API key not configured")
 
     voice_id = payload.voice_id or ELEVEN_LABS_VOICE_ID
     text = payload.text.strip()
@@ -457,35 +555,45 @@ async def text_to_speech(payload: TTSRequest):
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream",
-                headers={
-                    "xi-api-key": ELEVEN_LABS_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "text": text,
-                    "model_id": "eleven_multilingual_v2",
-                    "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.75,
+    # Limit concurrent requests using semaphore
+    async with TTS_SEMAPHORE:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream",
+                    headers={
+                        "xi-api-key": ELEVEN_LABS_API_KEY,
+                        "Content-Type": "application/json",
                     },
-                },
-                params={
-                    "output_format": "mp3_44100_128",
-                    "webhook_url": ELEVEN_LABS_WEBHOOK_URL,
-                },
-            )
-            response.raise_for_status()
-            return TTSResponse(success=True, message="TTS request sent to Eleven Labs")
-    except httpx.HTTPStatusError as exc:
-        LOGGER.exception("Eleven Labs API error: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Eleven Labs API error: {exc.response.text}") from exc
-    except Exception as exc:  # pylint: disable=broad-except
-        LOGGER.exception("Failed to send TTS request: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to send TTS request") from exc
+                    json={
+                        "text": text,
+                        "model_id": "eleven_multilingual_v2",
+                        "voice_settings": {
+                            "stability": 0.5,
+                            "similarity_boost": 0.75,
+                        },
+                    },
+                    params={
+                        "output_format": "mp3_44100_128",
+                        "webhook_url": ELEVEN_LABS_WEBHOOK_URL,
+                    },
+                )
+                response.raise_for_status()
+                return TTSResponse(success=True, message="TTS request sent to Eleven Labs")
+        except httpx.HTTPStatusError as exc:
+            # Handle 401 Unauthorized (invalid API key) - only log at debug level to reduce noise
+            if exc.response.status_code == 401:
+                # Log at debug level instead of warning to reduce log spam
+                # Frontend will fallback to browser TTS anyway
+                LOGGER.debug("Eleven Labs API returned 401 (will fallback to browser TTS): %s", 
+                           exc.response.text[:100] if exc.response.text else "Unauthorized")
+                return TTSResponse(success=False, message="Eleven Labs API key invalid or expired")
+            else:
+                LOGGER.warning("Eleven Labs API error (status %d): %s", exc.response.status_code, exc.response.text[:200])
+                return TTSResponse(success=False, message=f"Eleven Labs API error: {exc.response.status_code}")
+        except Exception as exc:  # pylint: disable=broad-except
+            LOGGER.debug("Failed to send TTS request (will fallback to browser TTS): %s", exc)
+            return TTSResponse(success=False, message="Failed to send TTS request")
 
 
 @app.post("/api/eleven-webhook")

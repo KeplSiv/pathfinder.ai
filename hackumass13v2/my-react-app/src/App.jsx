@@ -30,6 +30,7 @@ function GuidanceApp() {
   const [llmIntervalMs, setLlmIntervalMs] = useState(1000);
   const [ttsDelayMs, setTtsDelayMs] = useState(0);
   const [llmProvider, setLlmProvider] = useState("claude");
+  const [outputMode, setOutputMode] = useState("short_alerts");
   const pollIntervalMs = 600;
 
   return (
@@ -45,6 +46,7 @@ function GuidanceApp() {
         minIntervalMs={llmIntervalMs}
         context={{ intervalMs: llmIntervalMs }}
         provider={llmProvider}
+        mode={outputMode}
       >
         <Layout>
           <div className="video-section">
@@ -73,6 +75,8 @@ function GuidanceApp() {
               onChangeTTSDelay={setTtsDelayMs}
               llmProvider={llmProvider}
               onChangeLLMProvider={setLlmProvider}
+              outputMode={outputMode}
+              onChangeOutputMode={setOutputMode}
             />
             <AlertTranscript maxItems={8} />
             <AudioFeedback

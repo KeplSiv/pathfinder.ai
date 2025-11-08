@@ -13,6 +13,8 @@ export default function ControlPanel({
   onChangeTTSDelay,
   llmProvider = "claude",
   onChangeLLMProvider,
+  outputMode = "sentences",
+  onChangeOutputMode,
 }) {
   const { devices, deviceId, setDeviceId, refreshDevices, isEnumerating } =
     useCameraContext();
@@ -90,6 +92,41 @@ export default function ControlPanel({
               Provider locked while guidance is active
             </span>
           )}
+        </div>
+      )}
+
+      {onChangeOutputMode && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <label htmlFor="output-mode" style={{ fontWeight: 500 }}>
+            Output Mode
+          </label>
+          <select
+            id="output-mode"
+            value={outputMode}
+            onChange={(event) => onChangeOutputMode(event.target.value)}
+            disabled={isGuidanceActive}
+            style={{
+              padding: "0.5rem",
+              borderRadius: "0.5rem",
+              border: "1px solid #D1D5DB",
+              background: isGuidanceActive ? "#F3F4F6" : "#fff",
+              cursor: isGuidanceActive ? "not-allowed" : "pointer",
+              opacity: isGuidanceActive ? 0.6 : 1,
+            }}
+          >
+            <option value="sentences">Sentences (Speech Mode)</option>
+            <option value="short_alerts">Short Alerts (Current)</option>
+          </select>
+          {isGuidanceActive && (
+            <span style={{ fontSize: "0.75rem", color: "#6B7280", fontStyle: "italic" }}>
+              Mode locked while guidance is active
+            </span>
+          )}
+          <span style={{ fontSize: "0.75rem", color: "#6B7280" }}>
+            {outputMode === "sentences"
+              ? "Outputs: Short alerts (1-3 words) - No token limit"
+              : "Outputs: Full sentences - Token limited"}
+          </span>
         </div>
       )}
 
