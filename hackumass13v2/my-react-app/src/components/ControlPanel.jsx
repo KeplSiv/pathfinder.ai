@@ -11,6 +11,8 @@ export default function ControlPanel({
   onChangeLLMInterval,
   ttsDelayMs = 0,
   onChangeTTSDelay,
+  llmProvider = "claude",
+  onChangeLLMProvider,
 }) {
   const { devices, deviceId, setDeviceId, refreshDevices, isEnumerating } =
     useCameraContext();
@@ -61,6 +63,36 @@ export default function ControlPanel({
         </button>
       </div>
 
+      {onChangeLLMProvider && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <label htmlFor="llm-provider" style={{ fontWeight: 500 }}>
+            LLM Provider
+          </label>
+          <select
+            id="llm-provider"
+            value={llmProvider}
+            onChange={(event) => onChangeLLMProvider(event.target.value)}
+            disabled={isGuidanceActive}
+            style={{
+              padding: "0.5rem",
+              borderRadius: "0.5rem",
+              border: "1px solid #D1D5DB",
+              background: isGuidanceActive ? "#F3F4F6" : "#fff",
+              cursor: isGuidanceActive ? "not-allowed" : "pointer",
+              opacity: isGuidanceActive ? 0.6 : 1,
+            }}
+          >
+            <option value="claude">Claude (Anthropic)</option>
+            <option value="gemini">Gemini (Google)</option>
+          </select>
+          {isGuidanceActive && (
+            <span style={{ fontSize: "0.75rem", color: "#6B7280", fontStyle: "italic" }}>
+              Provider locked while guidance is active
+            </span>
+          )}
+        </div>
+      )}
+
       <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
         <input
           type="checkbox"
@@ -75,7 +107,7 @@ export default function ControlPanel({
           style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
         >
           <label htmlFor="llm-interval" style={{ fontWeight: 500 }}>
-            Claude Update Frequency
+            LLM Update Frequency
           </label>
           <input
             id="llm-interval"

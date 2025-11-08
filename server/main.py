@@ -17,6 +17,12 @@ from ultralytics import YOLO
 from anthropic import Anthropic, APIStatusError, APIError
 from dotenv import load_dotenv
 from transformers import AutoImageProcessor, AutoModelForDepthEstimation
+try:
+    from google import genai as google_genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    google_genai = None
 
 LOGGER = logging.getLogger("torch-detector")
 
@@ -46,7 +52,6 @@ class Detection(BaseModel):
     bbox: List[float]
     updatedAt: int
     relative_depth: Optional[float] = None
-
 
 class DetectionResponse(BaseModel):
     detections: List[Detection]
@@ -161,6 +166,8 @@ DEPTH_PROCESSOR = None
 DEPTH_MODEL = None
 ANTHROPIC_CLIENT: Optional[Anthropic] = None
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-20250514")
+GEMINI_CLIENT = None
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 ELEVEN_LABS_API_KEY = os.getenv("ELEVEN_LABS_API_KEY", "").strip().strip('"').strip("'")
 ELEVEN_LABS_WEBHOOK_SECRET = os.getenv("ELEVEN_LABS_WEBHOOK_SECRET", "").strip().strip('"').strip("'")
 ELEVEN_LABS_VOICE_ID = os.getenv("ELEVEN_LABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Default voice
@@ -178,7 +185,7 @@ SYSTEM_PROMPT = (
 def load_model():
     global MODEL  # pylint: disable=global-statement
     global DEPTH_PROCESSOR, DEPTH_MODEL  # pylint: disable=global-statement
-    global ANTHROPIC_CLIENT  # pylint: disable=global-statement
+    global ANTHROPIC_CLIENT, GEMINI_CLIENT  # pylint: disable=global-statement
     try:
         MODEL = _ensure_model()
         LOGGER.info("Loaded YOLO model from %s", MODEL_PATH)
@@ -198,6 +205,7 @@ def load_model():
         DEPTH_PROCESSOR = None
         DEPTH_MODEL = None
 
+    # Initialize Anthropic (Claude) client
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip().strip('"').strip("'")
     if api_key:
         masked_key = api_key[:10] + "..." + api_key[-4:] if len(api_key) > 14 else "***"
@@ -207,10 +215,27 @@ def load_model():
             LOGGER.info("Anthropic client initialised for model %s", ANTHROPIC_MODEL)
         except Exception as exc:  # pylint: disable=broad-except
             ANTHROPIC_CLIENT = None
-            LOGGER.error("Failed to initialise Anthropic client (LLM features disabled): %s", exc)
+            LOGGER.error("Failed to initialise Anthropic client (Claude features disabled): %s", exc)
             LOGGER.error("This is non-fatal - detection will still work. Check Anthropic SDK version compatibility.")
     else:
-        LOGGER.warning("ANTHROPIC_API_KEY not set; /api/llm will return 503 until configured.")
+        LOGGER.warning("ANTHROPIC_API_KEY not set; Claude features will be disabled.")
+
+    # Initialize Gemini client
+    if GEMINI_AVAILABLE:
+        gemini_key = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
+        if gemini_key:
+            masked_key = gemini_key[:10] + "..." + gemini_key[-4:] if len(gemini_key) > 14 else "***"
+            LOGGER.info("Found GEMINI_API_KEY: %s", masked_key)
+            try:
+                GEMINI_CLIENT = google_genai.Client(api_key=gemini_key)
+                LOGGER.info("Gemini client initialised for model %s", GEMINI_MODEL)
+            except Exception as exc:  # pylint: disable=broad-except
+                GEMINI_CLIENT = None
+                LOGGER.warning("Failed to initialise Gemini client (Gemini features disabled): %s", exc)
+        else:
+            LOGGER.warning("GEMINI_API_KEY not set; Gemini features will be disabled.")
+    else:
+        LOGGER.warning("google-genai package not installed; Gemini features will be disabled.")
 
 
 @app.get("/healthz")
@@ -323,6 +348,7 @@ class LLMRequest(BaseModel):
     detections: List[Detection] = Field(default_factory=list)
     context: Dict[str, Any] = Field(default_factory=dict)
     prompt: Optional[str] = None
+    provider: Optional[str] = "claude"  # "claude" or "gemini"
 
 
 class LLMResponse(BaseModel):
@@ -351,43 +377,62 @@ def generate_guidance(payload: LLMRequest):
     if not payload.detections:
         return LLMResponse(message=None)
 
-    if ANTHROPIC_CLIENT is None:
-        raise HTTPException(status_code=503, detail="Anthropic client is not configured")
-
+    provider = (payload.provider or "claude").lower()
     user_prompt = _render_prompt(payload)
     system_prompt = payload.prompt or SYSTEM_PROMPT
 
-    try:
-        response = ANTHROPIC_CLIENT.messages.create(
-            model=ANTHROPIC_MODEL,
-            max_tokens=600,
-            temperature=0.1,
-            system=system_prompt,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": user_prompt,
-                        }
-                    ],
-                }
-            ],
-        )
-    except (APIError, APIStatusError) as exc:
-        LOGGER.exception("Anthropic API error: %s", exc)
-        raise HTTPException(status_code=502, detail="Anthropic service unavailable") from exc
-    except Exception as exc:  # pylint: disable=broad-except
-        LOGGER.exception("Unexpected error calling Anthropic: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to generate guidance") from exc
+    if provider == "gemini":
+        if GEMINI_CLIENT is None:
+            raise HTTPException(status_code=503, detail="Gemini client is not configured")
+        
+        try:
+            # Combine system prompt and user prompt for Gemini
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            response = GEMINI_CLIENT.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=full_prompt
+            )
+            message = response.text if hasattr(response, 'text') else str(response)
+            return LLMResponse(message=message.strip() or None)
+        except Exception as exc:  # pylint: disable=broad-except
+            LOGGER.exception("Gemini API error: %s", exc)
+            raise HTTPException(status_code=502, detail="Gemini service unavailable") from exc
+    
+    else:  # Default to Claude
+        if ANTHROPIC_CLIENT is None:
+            raise HTTPException(status_code=503, detail="Anthropic client is not configured")
 
-    message = ""
-    for block in response.content:
-        if block.type == "text":
-            message += block.text
+        try:
+            response = ANTHROPIC_CLIENT.messages.create(
+                model=ANTHROPIC_MODEL,
+                max_tokens=600,
+                temperature=0.1,
+                system=system_prompt,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": user_prompt,
+                            }
+                        ],
+                    }
+                ],
+            )
+        except (APIError, APIStatusError) as exc:
+            LOGGER.exception("Anthropic API error: %s", exc)
+            raise HTTPException(status_code=502, detail="Anthropic service unavailable") from exc
+        except Exception as exc:  # pylint: disable=broad-except
+            LOGGER.exception("Unexpected error calling Anthropic: %s", exc)
+            raise HTTPException(status_code=500, detail="Failed to generate guidance") from exc
 
-    return LLMResponse(message=message.strip() or None)
+        message = ""
+        for block in response.content:
+            if block.type == "text":
+                message += block.text
+
+        return LLMResponse(message=message.strip() or None)
 
 
 class TTSRequest(BaseModel):

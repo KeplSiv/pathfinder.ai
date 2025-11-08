@@ -11,6 +11,7 @@ export function useLLMFeedback({
   enabled = true,
   context = {},
   minIntervalMs = DEFAULT_INTERVAL_MS,
+  provider = "claude",
 } = {}) {
   const llmService = useMemo(
     () => new LLMService({ endpoint, transformer }),
@@ -23,12 +24,13 @@ export function useLLMFeedback({
 
   const requestGuidance = useMemo(
     () =>
-      throttle(async (currentDetections, currentContext) => {
+      throttle(async (currentDetections, currentContext, currentProvider) => {
         try {
           setStatus("running");
           const guidance = await llmService.generateGuidance(
             currentDetections,
-            currentContext
+            currentContext,
+            currentProvider
           );
           setMessage(guidance);
           setStatus("idle");
@@ -60,10 +62,10 @@ export function useLLMFeedback({
     }
 
     lastSignatureRef.current = signature;
-    requestGuidance(detections, context);
+    requestGuidance(detections, context, provider);
 
     return () => {};
-  }, [context, detections, enabled, requestGuidance]);
+  }, [context, detections, enabled, requestGuidance, provider]);
 
   return {
     message,

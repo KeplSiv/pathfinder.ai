@@ -8,7 +8,7 @@ export default class LLMService {
     this.transformer = transformer;
   }
 
-  async generateGuidance(detections, context = {}) {
+  async generateGuidance(detections, context = {}, provider = "claude") {
     if (!detections || detections.length === 0) {
       return null;
     }
@@ -20,6 +20,7 @@ export default class LLMService {
     const response = await postJson(this.endpoint, {
       detections,
       context,
+      provider,
     });
 
     return response.message ?? null;

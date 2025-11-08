@@ -29,6 +29,7 @@ function GuidanceApp() {
   const [showOverlay, setShowOverlay] = useState(true);
   const [llmIntervalMs, setLlmIntervalMs] = useState(1000);
   const [ttsDelayMs, setTtsDelayMs] = useState(0);
+  const [llmProvider, setLlmProvider] = useState("claude");
   const pollIntervalMs = 600;
 
   return (
@@ -43,6 +44,7 @@ function GuidanceApp() {
         enabled={guidanceActive}
         minIntervalMs={llmIntervalMs}
         context={{ intervalMs: llmIntervalMs }}
+        provider={llmProvider}
       >
         <Layout>
           <div className="video-section">
@@ -69,6 +71,8 @@ function GuidanceApp() {
               onChangeLLMInterval={setLlmIntervalMs}
               ttsDelayMs={ttsDelayMs}
               onChangeTTSDelay={setTtsDelayMs}
+              llmProvider={llmProvider}
+              onChangeLLMProvider={setLlmProvider}
             />
             <AlertTranscript maxItems={8} />
             <AudioFeedback

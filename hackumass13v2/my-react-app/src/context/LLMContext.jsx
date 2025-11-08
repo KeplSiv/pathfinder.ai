@@ -8,10 +8,10 @@ const LLMContext = createContext({
   error: null,
 });
 
-export function LLMProvider({ children, detections: overrideDetections, ...options }) {
+export function LLMProvider({ children, detections: overrideDetections, provider = "claude", ...options }) {
   const detectionContext = useDetectionContext();
   const detections = overrideDetections ?? detectionContext?.detections ?? [];
-  const llmState = useLLMFeedback({ detections, ...options });
+  const llmState = useLLMFeedback({ detections, provider, ...options });
 
   return <LLMContext.Provider value={llmState}>{children}</LLMContext.Provider>;
 }
