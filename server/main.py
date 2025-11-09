@@ -161,13 +161,13 @@ def get_depth_map(frame: Image.Image) -> Optional[np.ndarray]:
 
 app = FastAPI(title="YOLO11n Traffic Detector", version="1.0.0")
 
-# Add CORS middleware
+# Add CORS middleware - allow all origins for hackathon (can restrict later)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_origins=["*"],  # Allows all origins - fine for hackathon/prototyping
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 MODEL = None
