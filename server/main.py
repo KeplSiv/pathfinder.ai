@@ -26,6 +26,12 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
     google_genai = None
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+    SentenceTransformer = None
 
 LOGGER = logging.getLogger("torch-detector")
 
@@ -176,6 +182,8 @@ GEMINI_REQUEST_TIMESTAMPS = deque(maxlen=10)  # Track last 10 requests
 ELEVEN_LABS_API_KEY = os.getenv("ELEVEN_LABS_API_KEY", "").strip().strip('"').strip("'")
 # Limit concurrent TTS requests to avoid overwhelming Eleven Labs API
 TTS_SEMAPHORE = asyncio.Semaphore(2)  # Max 2 concurrent TTS requests
+# Sentence transformer model for semantic similarity
+SENTENCE_MODEL = None
 ELEVEN_LABS_WEBHOOK_SECRET = os.getenv("ELEVEN_LABS_WEBHOOK_SECRET", "").strip().strip('"').strip("'")
 ELEVEN_LABS_VOICE_ID = os.getenv("ELEVEN_LABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Default voice
 ELEVEN_LABS_WEBHOOK_URL = os.getenv("ELEVEN_LABS_WEBHOOK_URL", "https://localhost:5173/hackumass/TTSTHING")
@@ -266,6 +274,17 @@ def load_model():
             LOGGER.warning("GEMINI_API_KEY not set; Gemini features will be disabled.")
     else:
         LOGGER.warning("google-genai package not installed; Gemini features will be disabled.")
+
+    # Load sentence transformer model for semantic similarity
+    if SENTENCE_TRANSFORMERS_AVAILABLE:
+        try:
+            SENTENCE_MODEL = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+            LOGGER.info("Loaded sentence transformer model for semantic similarity")
+        except Exception as exc:  # pylint: disable=broad-except
+            SENTENCE_MODEL = None
+            LOGGER.warning("Failed to load sentence transformer model (similarity checks disabled): %s", exc)
+    else:
+        LOGGER.warning("sentence-transformers package not installed; semantic similarity checks will be disabled.")
 
 
 @app.get("/healthz")
@@ -594,6 +613,66 @@ async def text_to_speech(payload: TTSRequest):
         except Exception as exc:  # pylint: disable=broad-except
             LOGGER.debug("Failed to send TTS request (will fallback to browser TTS): %s", exc)
             return TTSResponse(success=False, message="Failed to send TTS request")
+
+
+class SimilarityRequest(BaseModel):
+    text: str
+    previous_texts: List[str] = Field(default_factory=list)
+
+
+class SimilarityResponse(BaseModel):
+    is_similar: bool
+    max_similarity: float
+    threshold: float = 0.5
+
+
+@app.post("/api/similarity", response_model=SimilarityResponse)
+def check_similarity(payload: SimilarityRequest):
+    """Check if text is semantically similar to previous texts using sentence embeddings"""
+    if SENTENCE_MODEL is None:
+        # If model not available, fallback to simple string comparison
+        text_lower = payload.text.lower().strip()
+        for prev_text in payload.previous_texts:
+            prev_lower = prev_text.lower().strip()
+            if text_lower == prev_lower or text_lower in prev_lower or prev_lower in text_lower:
+                return SimilarityResponse(is_similar=True, max_similarity=1.0, threshold=0.85)
+        return SimilarityResponse(is_similar=False, max_similarity=0.0, threshold=0.85)
+
+    try:
+        # Encode the new text
+        new_embedding = SENTENCE_MODEL.encode(payload.text, convert_to_numpy=True)
+        
+        if not payload.previous_texts:
+            return SimilarityResponse(is_similar=False, max_similarity=0.0, threshold=0.85)
+        
+        # Encode all previous texts
+        prev_embeddings = SENTENCE_MODEL.encode(payload.previous_texts, convert_to_numpy=True)
+        
+        # Compute cosine similarity with all previous texts
+        # Cosine similarity: dot product / (norm1 * norm2)
+        new_norm = np.linalg.norm(new_embedding)
+        similarities = []
+        
+        for prev_emb in prev_embeddings:
+            prev_norm = np.linalg.norm(prev_emb)
+            if new_norm > 0 and prev_norm > 0:
+                cos_sim = np.dot(new_embedding, prev_emb) / (new_norm * prev_norm)
+                similarities.append(float(cos_sim))
+            else:
+                similarities.append(0.0)
+        
+        max_sim = max(similarities) if similarities else 0.0
+        threshold = 0.85  # Consider similar if cosine similarity > 0.85
+        
+        return SimilarityResponse(
+            is_similar=max_sim >= threshold,
+            max_similarity=max_sim,
+            threshold=threshold
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        LOGGER.warning("Similarity check failed: %s", exc)
+        # Fallback: allow TTS if similarity check fails
+        return SimilarityResponse(is_similar=False, max_similarity=0.0, threshold=0.85)
 
 
 @app.post("/api/eleven-webhook")
