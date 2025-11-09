@@ -130,9 +130,10 @@ def get_depth_map(frame: Image.Image) -> Optional[np.ndarray]:
             frame = frame.convert("RGB")
         
         # Optimize: Resize image for faster depth estimation (depth models work well on smaller images)
-        # Resize to max 512px width/height while maintaining aspect ratio for ~4x speedup
+        # Resize to max 384px width/height while maintaining aspect ratio for ~6x speedup
+        # Smaller size still provides accurate relative depth for detection bounding boxes
         original_width, original_height = frame.size
-        max_size = 512
+        max_size = 384  # Reduced from 512 for even faster processing
         
         if original_width > max_size or original_height > max_size:
             if original_width > original_height:
@@ -346,7 +347,14 @@ def detect(payload: ImagePayload):
     np_image = np.array(image)
 
     try:
-        results = MODEL(np_image, verbose=False)
+        # Optimize YOLO inference for speed
+        # Use optimized inference settings for faster processing
+        results = MODEL(
+            np_image, 
+            verbose=False,
+            imgsz=640,  # Standard YOLO input size (faster than auto-resize)
+            conf=payload.confidence or 0.3,  # Apply confidence threshold early
+        )
     except Exception as exc:  # pylint: disable=broad-except
         LOGGER.exception("Model inference failed: %s", exc)
         raise HTTPException(status_code=500, detail="Model inference failed") from exc

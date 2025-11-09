@@ -7,8 +7,8 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "http://144.202.0.231:8000", // Vultr server (connection refused - fix server first)
-        // target: "http://localhost:8000", // Local server - works perfectly
+        // target: "http://144.202.0.231:8000", // Vultr server (connection refused - fix server first)
+        target: "http://localhost:8000", // Local server - works perfectly
         changeOrigin: true,
         secure: false, // Set to true if using HTTPS
         ws: true, // Enable WebSocket proxying if needed
@@ -18,7 +18,7 @@ export default defineConfig({
           });
           proxy.on("proxyReq", (proxyReq, req, res) => {
             console.log(
-              `[Proxy] Forwarding ${req.method} ${req.url} → http://144.202.0.231:8000${req.url}`
+              `[Proxy] Forwarding ${req.method} ${req.url} → http://localhost:8000${req.url}`
             );
           });
           proxy.on("proxyRes", (proxyRes, req, res) => {

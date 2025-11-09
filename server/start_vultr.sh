@@ -1,7 +1,3 @@
-#!/bin/bash
-# Quick start script for Vultr server
-# Run this on your Vultr server: bash start_vultr.sh
-
 set -e
 
 echo "=== Starting Vultr Server ==="

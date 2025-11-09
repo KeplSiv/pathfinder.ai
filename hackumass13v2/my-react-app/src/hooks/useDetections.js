@@ -71,11 +71,14 @@ export function useDetections({
         const sampler = frameSamplerRef.current;
         if (!sampler.shouldSample()) return;
 
-        // Use lower quality and smaller size for faster uploads over network
+        // Optimize image quality/size based on whether we're using local or remote server
+        // For localhost: higher quality (0.7) and larger size (800px) for better accuracy
+        // For remote: lower quality (0.6) and smaller size (640px) for faster uploads
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         const frame = await sampler.grabFrame(videoEl, { 
           output: "blob", 
-          quality: 0.6,  // Reduced from 0.8 for smaller file size
-          maxWidth: 640   // Resize to max 640px width (YOLO works fine on this)
+          quality: isLocalhost ? 0.7 : 0.6,  // Better quality for local server
+          maxWidth: isLocalhost ? 800 : 640   // Larger size for local server (better accuracy)
         });
         if (!frame) return;
 

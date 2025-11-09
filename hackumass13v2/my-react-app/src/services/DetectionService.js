@@ -20,8 +20,14 @@ export default class DetectionService {
     const payload = await normalizePayload(imagePayload);
     // Keep depth estimation enabled (needed for relative_depth in detections)
     payload.skip_depth = false;
-    // Use longer timeout for detection (YOLO + depth estimation can be slow over network)
-    const response = await postJson(this.endpoint, payload, { timeout: 45000 });
+    
+    // Optimize timeout based on server location
+    // Localhost: faster timeout (15s) since no network latency
+    // Remote: longer timeout (45s) for network + processing
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const timeout = isLocalhost ? 15000 : 45000;
+    
+    const response = await postJson(this.endpoint, payload, { timeout });
     return response.detections ?? [];
   }
 }
