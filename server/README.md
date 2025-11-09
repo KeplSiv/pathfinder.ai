@@ -14,10 +14,11 @@ This FastAPI service loads the local `yolo11n.pt` checkpoint and exposes an HTTP
    cp /path/to/yolo11n.pt ./models/yolo11n.pt
    ```
 4. Set up API keys in `.env` file in the `server/` directory:
+
    ```
    ANTHROPIC_API_KEY=sk-ant-api03-...
    ANTHROPIC_MODEL=claude-opus-4-20250514  # optional
-   
+
    # Eleven Labs TTS (optional)
    ELEVEN_LABS_API_KEY=your_eleven_labs_api_key
    ELEVEN_LABS_WEBHOOK_SECRET=your_webhook_secret  # optional, for webhook security
