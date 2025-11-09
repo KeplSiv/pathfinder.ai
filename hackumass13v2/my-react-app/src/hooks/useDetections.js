@@ -71,7 +71,12 @@ export function useDetections({
         const sampler = frameSamplerRef.current;
         if (!sampler.shouldSample()) return;
 
-        const frame = await sampler.grabFrame(videoEl, { output: "blob" });
+        // Use lower quality and smaller size for faster uploads over network
+        const frame = await sampler.grabFrame(videoEl, { 
+          output: "blob", 
+          quality: 0.6,  // Reduced from 0.8 for smaller file size
+          maxWidth: 640   // Resize to max 640px width (YOLO works fine on this)
+        });
         if (!frame) return;
 
         setStatus("running");

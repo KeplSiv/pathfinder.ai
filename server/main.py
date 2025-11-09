@@ -69,6 +69,7 @@ class DetectionResponse(BaseModel):
 class ImagePayload(BaseModel):
     image: str
     confidence: Optional[float] = 0.3
+    skip_depth: Optional[bool] = False  # Skip depth estimation for faster responses
 
 
 def _decode_image(data_url: str) -> Image.Image:
@@ -128,6 +129,20 @@ def get_depth_map(frame: Image.Image) -> Optional[np.ndarray]:
         if frame.mode != "RGB":
             frame = frame.convert("RGB")
         
+        # Optimize: Resize image for faster depth estimation (depth models work well on smaller images)
+        # Resize to max 512px width/height while maintaining aspect ratio for ~4x speedup
+        original_width, original_height = frame.size
+        max_size = 512
+        
+        if original_width > max_size or original_height > max_size:
+            if original_width > original_height:
+                new_width = max_size
+                new_height = int(original_height * (max_size / original_width))
+            else:
+                new_height = max_size
+                new_width = int(original_width * (max_size / original_height))
+            frame = frame.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
         # Process image with explicit HWC format to avoid channel ambiguity
         inputs = DEPTH_PROCESSOR(
             images=frame, 
@@ -144,6 +159,12 @@ def get_depth_map(frame: Image.Image) -> Optional[np.ndarray]:
         # Ensure depth is 2D (H, W)
         if len(depth.shape) > 2:
             depth = depth.squeeze()
+        
+        # Resize depth map back to original image size if we resized
+        if original_width != frame.width or original_height != frame.height:
+            depth_pil = Image.fromarray((depth * 255).astype(np.uint8))
+            depth_pil = depth_pil.resize((original_width, original_height), Image.Resampling.LANCZOS)
+            depth = np.array(depth_pil).astype(np.float32) / 255.0
         
         # Normalize 0 → 1 for relative depth
         depth_min = depth.min()
@@ -330,9 +351,9 @@ def detect(payload: ImagePayload):
         LOGGER.exception("Model inference failed: %s", exc)
         raise HTTPException(status_code=500, detail="Model inference failed") from exc
 
-    # Generate depth map if depth model is available (non-blocking, errors won't break detection)
+    # Generate depth map if depth model is available and not skipped (non-blocking, errors won't break detection)
     depth_map = None
-    if DEPTH_PROCESSOR is not None and DEPTH_MODEL is not None:
+    if not payload.skip_depth and DEPTH_PROCESSOR is not None and DEPTH_MODEL is not None:
         try:
             depth_map = get_depth_map(image)
             if depth_map is not None:

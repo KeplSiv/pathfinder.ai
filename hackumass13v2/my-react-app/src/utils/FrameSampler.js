@@ -19,7 +19,7 @@ export default class FrameSampler {
 
   async grabFrame(
     videoEl,
-    { output = "blob", mimeType = "image/jpeg", quality = 0.8 } = {}
+    { output = "blob", mimeType = "image/jpeg", quality = 0.6, maxWidth = 640 } = {}
   ) {
     if (
       !videoEl ||
@@ -30,14 +30,31 @@ export default class FrameSampler {
       return null;
     }
 
-    this._canvas.width = videoEl.videoWidth;
-    this._canvas.height = videoEl.videoHeight;
+    // Resize image to reduce upload size (YOLO works fine on smaller images)
+    const originalWidth = videoEl.videoWidth;
+    const originalHeight = videoEl.videoHeight;
+    
+    let targetWidth = originalWidth;
+    let targetHeight = originalHeight;
+    
+    if (maxWidth && originalWidth > maxWidth) {
+      const scale = maxWidth / originalWidth;
+      targetWidth = maxWidth;
+      targetHeight = Math.round(originalHeight * scale);
+    }
+
+    this._canvas.width = targetWidth;
+    this._canvas.height = targetHeight;
     this._context.drawImage(
       videoEl,
       0,
       0,
-      videoEl.videoWidth,
-      videoEl.videoHeight
+      originalWidth,
+      originalHeight,
+      0,
+      0,
+      targetWidth,
+      targetHeight
     );
 
     this._lastSampleAt =
