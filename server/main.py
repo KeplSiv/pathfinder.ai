@@ -185,20 +185,29 @@ TTS_SEMAPHORE = asyncio.Semaphore(2)  # Max 2 concurrent TTS requests
 # Sentence transformer model for semantic similarity
 SENTENCE_MODEL = None
 ELEVEN_LABS_WEBHOOK_SECRET = os.getenv("ELEVEN_LABS_WEBHOOK_SECRET", "").strip().strip('"').strip("'")
-ELEVEN_LABS_VOICE_ID = os.getenv("ELEVEN_LABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Default voice
+ELEVEN_LABS_VOICE_ID = os.getenv("ELEVEN_LABS_VOICE_ID", "Qggl4b0xRMiqOwhPtVWT") 
 ELEVEN_LABS_WEBHOOK_URL = os.getenv("ELEVEN_LABS_WEBHOOK_URL", "https://localhost:5173/hackumass/TTSTHING")
 # Short alerts mode (1-3 words per detection) - token limited
 SHORT_ALERTS_PROMPT = (
-    "You are a safety-focused mobility assistant. Analyze incoming detections from a live camera feed. "
-    "Each detection includes a label and relative_depth (0 = very close, 1 = far). "
-    "CRITICAL: Output ONLY short, urgent alerts using 1-3 words maximum per detection. "
-    "Aggregate similar detections: if there are multiple of the same type, say 'two people' instead of 'person person', "
-    "'three cars' instead of 'car car car', etc. "
-    "Format: label + proximity (e.g., 'Fire very close', 'Two people ahead', 'Stop sign close'). "
-    "DO NOT use full sentences. DO NOT use JSON. DO NOT explain. "
-    "Only provide essential keywords for immediate action. Chain multiple alerts with commas if needed. "
-    "Example good output: 'Car close, Two people ahead, Fire very close' "
-    "Example bad output: 'I can see a car that is very close to you' or 'There is a person ahead'"
+    "You are a safety-focused mobility assistant providing real-time alerts from a camera feed. "
+    "Each detection includes a label (object type) and relative_depth (0.0 = closest/dangerous, 1.0 = farthest/safe). "
+    ""
+    "CRITICAL RULES: "
+    "1. Output ONLY concise alerts using 2-4 words maximum per object type. "
+    "2. Aggregate duplicates: say 'two people' not 'person person', 'three cars' not 'car car car'. "
+    "3. Use proximity indicators based on depth: 'very close' (depth < 0.3), 'close' (0.3-0.6), 'ahead' (depth > 0.6). "
+    "4. Prioritize nearby objects (low depth values) - mention them first. "
+    "5. Format: [count] [object] [proximity] - e.g., 'Two people close', 'Car very close', 'Stop sign ahead'. "
+    "6. Chain multiple alerts with commas: 'Car close, Person ahead, Fire very close'. "
+    ""
+    "DO NOT: "
+    "- Use full sentences or explanations "
+    "- Repeat the same alert multiple times "
+    "- Use JSON format "
+    "- Add unnecessary words like 'there is' or 'I see' "
+    ""
+    "Good examples: 'Two people close, Car ahead', 'Fire very close', 'Stop sign ahead, Person close' "
+    "Bad examples: 'I can see a car that is very close', 'There are two people ahead of you', 'Person person car'"
 )
 
 # Sentences mode (full sentences) - for speech/TTS, no token limiters
@@ -440,9 +449,10 @@ def generate_guidance(payload: LLMRequest):
         system_prompt = SHORT_ALERTS_PROMPT  # Short alerts prompt
     
     # Determine token limits based on mode
-    # Sentences mode: no token limiters (600 tokens for speech/TTS)
-    # Short alerts mode: keep token limiters (50 tokens)
-    max_tokens = 1600 if mode == "sentences" else 50
+    # Reduced tokens for faster responses while maintaining quality
+    # Sentences mode: 400 tokens (reduced from 1600 for speed)
+    # Short alerts mode: 30 tokens (reduced from 50 for speed)
+    max_tokens = 400 if mode == "sentences" else 30
 
     if provider == "gemini":
         if GEMINI_CLIENT is None:
