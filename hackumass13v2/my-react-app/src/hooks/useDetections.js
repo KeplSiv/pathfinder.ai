@@ -23,12 +23,12 @@ export function useDetections({
   const [error, setError] = useState(null);
   const lastDetectionsSignatureRef = useRef(null);
 
-  // Normalize detections for comparison - ignore timestamps, bbox positions, and small depth changes
-  // Only care about: what objects are present, their types, and significant depth changes
+  // Normalize detections for comparison - track object types, counts, and depth categories
+  // This ensures new objects entering the frame trigger updates
   const normalizeDetections = useCallback((dets) => {
     if (!dets || dets.length === 0) return null;
     
-    // Group by label and count, ignore exact positions
+    // Group by label and count, track depth categories
     const grouped = {};
     dets.forEach((d) => {
       const key = d.label;
@@ -48,6 +48,7 @@ export function useDetections({
     });
     
     // Convert to sorted array for consistent comparison
+    // Sort by label first, then by count (so new objects are detected)
     const normalized = Object.values(grouped)
       .sort((a, b) => {
         if (a.label !== b.label) return a.label.localeCompare(b.label);

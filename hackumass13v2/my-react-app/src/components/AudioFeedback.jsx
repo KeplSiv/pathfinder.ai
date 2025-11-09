@@ -17,7 +17,7 @@ export default function AudioFeedback({
   const ttsService = useElevenLabs ? new TTSService() : null;
   const similarityService = useRef(new SimilarityService());
   const recentMessagesRef = useRef([]); // Store last 5 messages for similarity check
-  const MAX_RECENT_MESSAGES = 5;
+  const MAX_RECENT_MESSAGES = 3;
 
   useEffect(() => {
     if (!enabled || !message) return;
@@ -31,15 +31,31 @@ export default function AudioFeedback({
       );
 
       // Only send to TTS if message is meaningfully different
-      if (similarityResult.isSimilar) {
+      // But allow if similarity is below threshold (new information)
+      if (
+        similarityResult.isSimilar &&
+        similarityResult.maxSimilarity >= 0.35
+      ) {
         console.log(
-          `Skipping TTS - message too similar (similarity: ${similarityResult.maxSimilarity.toFixed(2)})`
+          `Skipping TTS - message too similar (similarity: ${similarityResult.maxSimilarity.toFixed(
+            2
+          )})`
         );
         return;
       }
 
+      // If similarity is high but below threshold, or if it's new information, proceed with TTS
+      console.log(
+        `TTS approved - similarity: ${similarityResult.maxSimilarity.toFixed(
+          2
+        )}, threshold: ${similarityResult.threshold}`
+      );
+
       // Add to recent messages (keep last 5)
-      recentMessagesRef.current = [message, ...previousTexts].slice(0, MAX_RECENT_MESSAGES);
+      recentMessagesRef.current = [message, ...previousTexts].slice(
+        0,
+        MAX_RECENT_MESSAGES
+      );
 
       if (useElevenLabs && ttsService) {
         // Send to Eleven Labs TTS
@@ -62,7 +78,14 @@ export default function AudioFeedback({
     };
 
     processMessage();
-  }, [audioQueue, audioUrlResolver, enabled, message, useElevenLabs, ttsService]);
+  }, [
+    audioQueue,
+    audioUrlResolver,
+    enabled,
+    message,
+    useElevenLabs,
+    ttsService,
+  ]);
 
   if (!renderStatus) {
     return null;

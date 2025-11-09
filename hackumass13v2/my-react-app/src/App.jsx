@@ -27,11 +27,11 @@ function GuidanceApp() {
   const videoRef = useRef(null);
   const [guidanceActive, setGuidanceActive] = useState(false);
   const [showOverlay, setShowOverlay] = useState(true);
-  const [llmIntervalMs, setLlmIntervalMs] = useState(1000);
+  const [llmIntervalMs, setLlmIntervalMs] = useState(500); // Reduced for faster real-time response
   const [ttsDelayMs, setTtsDelayMs] = useState(0);
   const [llmProvider, setLlmProvider] = useState("claude");
   const [outputMode, setOutputMode] = useState("short_alerts");
-  const pollIntervalMs = 600;
+  const pollIntervalMs = 400; // Reduced from 600ms for faster detection updates
 
   return (
     <DetectionProvider

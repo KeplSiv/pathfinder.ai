@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import LLMService from "../services/LLMService";
 import { throttle } from "../utils/ThrottleUtils";
 
-const DEFAULT_INTERVAL_MS = 2000;
+const DEFAULT_INTERVAL_MS = 500; // Reduced from 2000ms for faster responses
 // Gemini free tier: 10 requests/minute = 6000ms minimum between requests
 const GEMINI_MIN_INTERVAL_MS = 6000;
 
@@ -170,11 +170,49 @@ export function useLLMFeedback({
       return undefined;
     }
 
+    // Check if this is a significant change (new objects appeared or objects disappeared)
+    const prevSignature = lastSignatureRef.current;
+    let isSignificantChange = true;
+    
+    if (prevSignature) {
+      try {
+        const prevData = JSON.parse(prevSignature);
+        const currData = JSON.parse(signature);
+        
+        // Compare detection counts - if counts changed, it's significant
+        const prevCounts = {};
+        const currCounts = {};
+        
+        // Parse detections (they're already JSON strings in the signature)
+        const prevDets = prevData.detections ? (typeof prevData.detections === 'string' ? JSON.parse(prevData.detections) : prevData.detections) : [];
+        const currDets = currData.detections ? (typeof currData.detections === 'string' ? JSON.parse(currData.detections) : currData.detections) : [];
+        
+        prevDets.forEach((d) => {
+          prevCounts[d.label] = (prevCounts[d.label] || 0) + (d.count || 1);
+        });
+        
+        currDets.forEach((d) => {
+          currCounts[d.label] = (currCounts[d.label] || 0) + (d.count || 1);
+        });
+        
+        // Check if any object type count changed or new objects appeared
+        const allLabels = new Set([...Object.keys(prevCounts), ...Object.keys(currCounts)]);
+        isSignificantChange = Array.from(allLabels).some((label) => {
+          const prevCount = prevCounts[label] || 0;
+          const currCount = currCounts[label] || 0;
+          return prevCount !== currCount; // Count changed = significant
+        });
+      } catch (e) {
+        // If parsing fails, treat as significant change (safer to trigger)
+        isSignificantChange = true;
+      }
+    }
+
     // Require stability: wait a bit after change is detected before triggering
-    // This prevents rapid-fire requests when detections are fluctuating
+    // But use shorter delay for significant changes (new objects)
     const now = Date.now();
     const timeSinceLastChange = now - lastChangeTimeRef.current;
-    const STABILITY_DELAY_MS = 800; // Wait 800ms after change is detected
+    const STABILITY_DELAY_MS = isSignificantChange ? 200 : 400; // Faster for new objects
 
     // Clear any pending stability timeout
     if (stabilityTimeoutRef.current) {
@@ -182,7 +220,7 @@ export function useLLMFeedback({
       stabilityTimeoutRef.current = null;
     }
 
-    // If change was recent, wait for stability
+    // If change was recent, wait for stability (but shorter for significant changes)
     if (timeSinceLastChange < STABILITY_DELAY_MS) {
       stabilityTimeoutRef.current = setTimeout(() => {
         lastSignatureRef.current = signature;
