@@ -18,7 +18,8 @@ export default class DetectionService {
     }
 
     const payload = await normalizePayload(imagePayload);
-    const response = await postJson(this.endpoint, payload);
+    // Use longer timeout for detection (YOLO + depth estimation can be slow over network)
+    const response = await postJson(this.endpoint, payload, { timeout: 60000 });
     return response.detections ?? [];
   }
 }

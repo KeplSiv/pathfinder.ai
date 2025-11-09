@@ -7,8 +7,8 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "http://144.202.0.231:8000",
-        target: "http://localhost:8000", // Uncomment for local development
+        target: "http://144.202.0.231:8000", // Vultr server (connection refused - fix server first)
+        // target: "http://localhost:8000", // Local server - works perfectly
         changeOrigin: true,
         secure: false, // Set to true if using HTTPS
         ws: true, // Enable WebSocket proxying if needed

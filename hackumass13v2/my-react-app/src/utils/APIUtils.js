@@ -1,4 +1,5 @@
 const DEFAULT_TIMEOUT_MS = 30000; // 30 seconds - enough for YOLO detection and depth estimation
+const DETECTION_TIMEOUT_MS = 60000; // 60 seconds for detection endpoint (YOLO + depth can be slow over network)
 
 // Debug: Log API configuration
 const API_BASE_URL = import.meta.env.DEV
@@ -60,12 +61,32 @@ export async function fetchWithTimeout(resource, options = {}) {
 
     return response;
   } catch (error) {
+    // Provide better error messages for common issues
+    let errorMessage = error.message;
+    if (error.name === "AbortError" || error.message.includes("aborted")) {
+      errorMessage =
+        "Request timed out or was cancelled. The server may be slow or unreachable.";
+    } else if (
+      error.message.includes("Failed to fetch") ||
+      error.message.includes("NetworkError")
+    ) {
+      errorMessage =
+        "Network error: Cannot reach the server. Check if the server is running at http://144.202.0.231:8000";
+    }
+
     console.error(`[API Debug] Request error:`, {
       url: fullUrl,
-      error: error.message,
+      error: errorMessage,
+      originalError: error.message,
       type: error.name,
+      isAbortError: error.name === "AbortError",
     });
-    throw error;
+
+    // Create a new error with better message
+    const enhancedError = new Error(errorMessage);
+    enhancedError.name = error.name;
+    enhancedError.originalError = error;
+    throw enhancedError;
   } finally {
     clearTimeout(timeoutId);
   }
@@ -96,14 +117,17 @@ export async function postJson(url, body, options = {}) {
         : body?.length || 0,
   });
 
+  // Extract timeout from options and pass to fetchWithTimeout
+  const { timeout, ...restOptions } = options;
   const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(options.headers ?? {}),
+      ...(restOptions.headers ?? {}),
     },
     body: JSON.stringify(body),
-    ...options,
+    timeout: timeout, // Pass timeout to fetchWithTimeout
+    ...restOptions,
   });
 
   const jsonData = await response.json();

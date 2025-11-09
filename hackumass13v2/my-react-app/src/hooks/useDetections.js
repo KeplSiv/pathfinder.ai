@@ -87,7 +87,17 @@ export function useDetections({
         setError(null);
         setStatus("idle");
       } catch (err) {
-        setError(err);
+        // Enhance error message for better debugging
+        const errorMessage = err.message || err.toString();
+        const enhancedError = {
+          ...err,
+          message: errorMessage.includes("aborted") 
+            ? "Detection request timed out. The server may be slow or unreachable."
+            : errorMessage.includes("Failed to fetch")
+            ? "Cannot connect to detection server. Is it running at http://144.202.0.231:8000?"
+            : errorMessage,
+        };
+        setError(enhancedError);
         setStatus("error");
       }
     },
