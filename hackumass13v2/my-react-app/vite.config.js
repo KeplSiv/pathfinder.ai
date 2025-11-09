@@ -8,7 +8,7 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: "http://144.202.0.231:8000",
-        // target: "http://localhost:8000", // Uncomment for local development
+        target: "http://localhost:8000", // Uncomment for local development
         changeOrigin: true,
         secure: false, // Set to true if using HTTPS
         ws: true, // Enable WebSocket proxying if needed

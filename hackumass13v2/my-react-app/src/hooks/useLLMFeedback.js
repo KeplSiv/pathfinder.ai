@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import LLMService from "../services/LLMService";
 import { throttle } from "../utils/ThrottleUtils";
 
-const DEFAULT_INTERVAL_MS = 500; // Reduced from 2000ms for faster responses
+const DEFAULT_INTERVAL_MS = 300; // Reduced for near real-time responses
 // Gemini free tier: 10 requests/minute = 6000ms minimum between requests
 const GEMINI_MIN_INTERVAL_MS = 6000;
 
@@ -208,11 +208,11 @@ export function useLLMFeedback({
       }
     }
 
-    // Require stability: wait a bit after change is detected before triggering
-    // But use shorter delay for significant changes (new objects)
+    // For significant changes (new objects), trigger immediately for real-time feel
+    // For minor changes, use minimal delay to prevent jitter
     const now = Date.now();
     const timeSinceLastChange = now - lastChangeTimeRef.current;
-    const STABILITY_DELAY_MS = isSignificantChange ? 200 : 400; // Faster for new objects
+    const STABILITY_DELAY_MS = isSignificantChange ? 50 : 150; // Very fast - near real-time
 
     // Clear any pending stability timeout
     if (stabilityTimeoutRef.current) {
@@ -220,8 +220,15 @@ export function useLLMFeedback({
       stabilityTimeoutRef.current = null;
     }
 
-    // If change was recent, wait for stability (but shorter for significant changes)
-    if (timeSinceLastChange < STABILITY_DELAY_MS) {
+    // For significant changes, trigger almost immediately
+    // For minor changes, use minimal delay
+    if (isSignificantChange && timeSinceLastChange >= 50) {
+      // Significant change and enough time passed - trigger immediately
+      lastSignatureRef.current = signature;
+      lastChangeTimeRef.current = Date.now();
+      requestGuidance(detections, context, provider, mode);
+    } else if (timeSinceLastChange < STABILITY_DELAY_MS) {
+      // Wait for minimal stability
       stabilityTimeoutRef.current = setTimeout(() => {
         lastSignatureRef.current = signature;
         lastChangeTimeRef.current = Date.now();

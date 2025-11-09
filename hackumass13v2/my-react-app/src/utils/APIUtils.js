@@ -1,4 +1,4 @@
-const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_TIMEOUT_MS = 30000; // 30 seconds - enough for YOLO detection and depth estimation
 
 // Debug: Log API configuration
 const API_BASE_URL = import.meta.env.DEV

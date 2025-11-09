@@ -450,9 +450,9 @@ def generate_guidance(payload: LLMRequest):
     
     # Determine token limits based on mode
     # Reduced tokens for faster responses while maintaining quality
-    # Sentences mode: 400 tokens (reduced from 1600 for speed)
-    # Short alerts mode: 30 tokens (reduced from 50 for speed)
-    max_tokens = 400 if mode == "sentences" else 30
+    # Sentences mode: 300 tokens (optimized for speed)
+    # Short alerts mode: 25 tokens (optimized for speed)
+    max_tokens = 300 if mode == "sentences" else 25
 
     if provider == "gemini":
         if GEMINI_CLIENT is None:
